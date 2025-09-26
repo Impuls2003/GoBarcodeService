@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"golang.org/x/image/font"
@@ -38,7 +40,15 @@ type RequestParams struct {
 	QrLevel qr.ErrorCorrectionLevel
 }
 
-type program struct{}
+// Config описывает настройки сервиса
+type Config struct {
+	Host string `json:"host"`
+	Port string `json:"port"`
+}
+
+type program struct {
+	config Config
+}
 
 // список маршрутов
 var routes = []Route{
@@ -75,6 +85,10 @@ func (p *program) Start(s service.Service) error {
 }
 
 func (p *program) run() {
+
+	// Загружаем конфигурационный файл
+	p.config = loadConfig()
+
 	// Главная страница с документацией генерируется автоматически
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -103,8 +117,9 @@ func (p *program) run() {
 		http.HandleFunc(route.Path, route.Handler)
 	}
 
-	log.Println("GoBarcodeService service started on :8080")
-	if err := http.ListenAndServe("0.0.0.0:8080", nil); err != nil {
+	addr := p.config.Host + ":" + p.config.Port
+	log.Println("GoBarcodeService service started on " + addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -145,6 +160,44 @@ func main() {
 	if err != nil {
 		logger.Error(err)
 	}
+}
+
+// Загружаем конфигурацию
+func loadConfig() Config {
+
+	// Определяем путь к установочному файлу
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Println("Unable to determine path to exe:", err)
+		return Config{Host: "0.0.0.0", Port: "8080"}
+	}
+
+	configPath := filepath.Join(filepath.Dir(exePath), "config.json")
+
+	// Ищем config.json
+	file, err := os.Open(configPath)
+	if err != nil {
+		log.Println("config.json file not found, using port 0.0.0.0:8080")
+		return Config{Host: "0.0.0.0", Port: "8080"}
+	}
+	defer file.Close()
+
+	// Читаем config.json
+	var cfg Config
+	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
+		log.Println("Error reading config.json:", err)
+		return Config{Host: "0.0.0.0", Port: "8080"}
+	}
+
+	if cfg.Host == "" {
+		cfg.Host = "0.0.0.0"
+	}
+
+	if cfg.Port == "" {
+		cfg.Port = "8080"
+	}
+
+	return cfg
 }
 
 // Реализация функционала
